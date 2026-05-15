@@ -5,8 +5,6 @@ from jose import jwt
 from passlib.context import CryptContext
 from dotenv import load_dotenv
 from groq import Groq
-import chromadb
-from sentence_transformers import SentenceTransformer
 from pypdf import PdfReader
 import io
 import os
@@ -14,20 +12,13 @@ import os
 load_dotenv()
 
 app = FastAPI()
-
-app.add_middleware(
-  CORSMiddleware,
-  allow_origins=["*"],
-  allow_methods=["*"],
-  allow_headers=["*"]
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 pwd_ctx = CryptContext(schemes=["bcrypt"])
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-chroma = chromadb.Client()
-collection = chroma.get_or_create_collection("documents")
-embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+doc_store = {}
 
 @app.get("/")
 def root():
@@ -55,14 +46,9 @@ async def upload_file(file: UploadFile = File(...)):
         text = " ".join(page.extract_text() for page in reader.pages)
     else:
         text = content.decode("utf-8")
-    chunks = [text[i:i+500] for i in range(0, len(text), 500)]
-    embeddings = embed_model.encode(chunks).tolist()
-    collection.add(
-        documents=chunks,
-        embeddings=embeddings,
-        ids=[f"chunk_{i}_{file.filename}" for i in range(len(chunks))]
-    )
-    return {"chunks_stored": len(chunks)}
+    doc_store["current"] = text
+    chunks = len(text) // 500
+    return {"chunks_stored": max(1, chunks)}
 
 @app.post("/chat")
 def chat(session_id: str, user_message: str):
@@ -74,19 +60,13 @@ def chat(session_id: str, user_message: str):
         role = "user" if m["role"] == "user" else "assistant"
         chat_history.append({"role": role, "content": m["content"]})
 
-    try:
-        query_embedding = embed_model.encode([user_message]).tolist()
-        results = collection.query(query_embeddings=query_embedding, n_results=3)
-        context = "\n".join(results["documents"][0]) if results["documents"] else ""
-    except:
-        context = ""
-
+    context = doc_store.get("current", "")
     if context:
-        augmented_message = f"Context from uploaded documents:\n{context}\n\nUser: {user_message}"
+        augmented = f"Document context:\n{context[:3000]}\n\nUser: {user_message}"
     else:
-        augmented_message = user_message
+        augmented = user_message
 
-    chat_history.append({"role": "user", "content": augmented_message})
+    chat_history.append({"role": "user", "content": augmented})
 
     supabase.table("messages").insert(
         {"session_id": session_id, "role": "user", "content": user_message}
