@@ -2,10 +2,10 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
 from jose import jwt
-from passlib.context import CryptContext
 from dotenv import load_dotenv
 from groq import Groq
 from pypdf import PdfReader
+import bcrypt
 import io
 import os
 
@@ -14,11 +14,16 @@ load_dotenv()
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-pwd_ctx = CryptContext(schemes=["bcrypt"])
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 doc_store = {}
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
 
 @app.get("/")
 def root():
@@ -26,14 +31,14 @@ def root():
 
 @app.post("/signup")
 def signup(email: str, password: str):
-    hashed = pwd_ctx.hash(password)
+    hashed = hash_password(password)
     supabase.table("users").insert({"email": email, "password_hash": hashed}).execute()
     return {"message": "Account created"}
 
 @app.post("/login")
 def login(email: str, password: str):
     user = supabase.table("users").select("*").eq("email", email).single().execute()
-    if not pwd_ctx.verify(password, user.data["password_hash"]):
+    if not user.data or not verify_password(password, user.data["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
     token = jwt.encode({"sub": email}, os.getenv("JWT_SECRET"))
     return {"token": token}
