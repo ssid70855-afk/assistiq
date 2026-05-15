@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import axios from "axios";
 
-const API = "http://localhost:8000";
+const API = "https://assistiq-sa09.onrender.com";
 type Msg = { role: "user" | "bot"; text: string; time: string; id: number };
 type Page = "landing" | "login" | "signup" | "chat";
 type Chat = { id: string; title: string; messages: Msg[] };
