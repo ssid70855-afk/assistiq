@@ -27,10 +27,15 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
   const [recording, setRecording] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [waveform, setWaveform] = useState<number[]>([3,5,3,7,5,3,8,4,6,3]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const waveformRef = useRef<any>(null);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
 
   const currentSession = sessions.find(s => s.id === activeSession);
 
@@ -42,10 +47,31 @@ export default function App() {
     document.body.style.backgroundColor = darkMode ? "#0a0a0a" : "#ffffff";
   }, [darkMode]);
 
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
+        setShowAttachMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  useEffect(() => {
+    if (recording) {
+      waveformRef.current = setInterval(() => {
+        setWaveform(Array.from({ length: 10 }, () => Math.floor(Math.random() * 12) + 2));
+      }, 120);
+    } else {
+      clearInterval(waveformRef.current);
+      setWaveform([3,5,3,7,5,3,8,4,6,3]);
+    }
+    return () => clearInterval(waveformRef.current);
+  }, [recording]);
+
   function newSession() {
     const id = crypto.randomUUID();
-    const session: ChatSession = { id, title: "New chat", messages: [] };
-    setSessions(prev => [session, ...prev]);
+    setSessions(prev => [{ id, title: "New chat", messages: [] }, ...prev]);
     setActiveSession(id);
   }
 
@@ -76,6 +102,7 @@ export default function App() {
     const text = msg || input.trim();
     if (!text || !activeSession) return;
     setInput("");
+    setTranscript("");
     const session = sessions.find(s => s.id === activeSession)!;
     const userMsg: Message = { role: "user", content: text };
     const isFirst = session.messages.length === 0;
@@ -84,8 +111,7 @@ export default function App() {
     setLoading(true);
     try {
       const res = await axios.post(`${API}/chat?session_id=${activeSession}&user_message=${encodeURIComponent(text)}`);
-      const aiMsg: Message = { role: "ai", content: res.data.reply };
-      updateSession(activeSession, [...updated, aiMsg]);
+      updateSession(activeSession, [...updated, { role: "ai", content: res.data.reply }]);
     } catch {
       updateSession(activeSession, [...updated, { role: "ai", content: "Sorry, something went wrong." }]);
     }
@@ -104,8 +130,7 @@ export default function App() {
     updateSession(activeSession, updated);
     try {
       const res = await axios.post(`${API}/upload`, formData);
-      const aiMsg: Message = { role: "ai", content: `✅ Got it! I've loaded **${file.name}** (${res.data.chunks_stored} chunks). Ask me anything about it.` };
-      updateSession(activeSession, [...updated, aiMsg]);
+      updateSession(activeSession, [...updated, { role: "ai", content: `✅ Loaded **${file.name}** (${res.data.chunks_stored} chunks). Ask me anything about it.` }]);
     } catch {
       updateSession(activeSession, [...updated, { role: "ai", content: "Failed to upload file." }]);
     }
@@ -121,13 +146,12 @@ export default function App() {
     formData.append("file", file);
     setLoading(true);
     const session = sessions.find(s => s.id === activeSession)!;
-    const userMsg: Message = { role: "user", content: `🖼️ Uploaded image: ${file.name}`, imageUrl };
+    const userMsg: Message = { role: "user", content: `🖼️ ${file.name}`, imageUrl };
     const updated = [...session.messages, userMsg];
     updateSession(activeSession, updated);
     try {
       const res = await axios.post(`${API}/image`, formData);
-      const aiMsg: Message = { role: "ai", content: res.data.reply };
-      updateSession(activeSession, [...updated, aiMsg]);
+      updateSession(activeSession, [...updated, { role: "ai", content: res.data.reply }]);
     } catch {
       updateSession(activeSession, [...updated, { role: "ai", content: "Failed to analyze image." }]);
     }
@@ -137,10 +161,7 @@ export default function App() {
 
   function toggleVoice() {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Your browser doesn't support voice input. Try Chrome.");
-      return;
-    }
+    if (!SpeechRecognition) { alert("Try Chrome for voice input."); return; }
     if (recording) {
       recognitionRef.current?.stop();
       setRecording(false);
@@ -148,14 +169,25 @@ export default function App() {
     }
     const recognition = new SpeechRecognition();
     recognition.lang = "en-US";
-    recognition.interimResults = false;
+    recognition.interimResults = true;
+    recognition.continuous = false;
     recognition.onresult = (e: any) => {
-      const transcript = e.results[0][0].transcript;
-      setInput(transcript);
-      setRecording(false);
+      let interim = "";
+      let final = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) final += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
+      }
+      setTranscript(interim);
+      if (final) {
+        setInput(final);
+        setTranscript("");
+        setRecording(false);
+        setTimeout(() => sendMessage(final), 300);
+      }
     };
-    recognition.onerror = () => setRecording(false);
-    recognition.onend = () => setRecording(false);
+    recognition.onerror = () => { setRecording(false); setTranscript(""); };
+    recognition.onend = () => { setRecording(false); setTranscript(""); };
     recognitionRef.current = recognition;
     recognition.start();
     setRecording(true);
@@ -243,28 +275,24 @@ export default function App() {
               <p style={{ fontSize: 16, fontWeight: 500, color: text }}>How can I help you today?</p>
               <p style={{ fontSize: 14 }}>Type, speak, or upload a file to get started</p>
             </div>
-          ) : (
-            currentSession.messages.map((m, i) => (
-              <div key={i} style={{ display: "flex", gap: 10, flexDirection: m.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, background: m.role === "ai" ? "linear-gradient(135deg,#7F77DD,#1D9E75)" : "#534AB7", color: "white" }}>
-                  {m.role === "ai" ? "✦" : (email ? email[0].toUpperCase() : "U")}
-                </div>
-                <div style={{ maxWidth: "72%", display: "flex", flexDirection: "column", gap: 6 }}>
-                  {m.imageUrl && <img src={m.imageUrl} alt="uploaded" style={{ maxWidth: 200, borderRadius: 10, border: `1px solid ${border}` }} />}
-                  <div style={{ padding: "9px 13px", borderRadius: m.role === "user" ? "14px 4px 14px 14px" : "4px 14px 14px 14px", background: m.role === "user" ? "#534AB7" : surface, color: m.role === "user" ? "white" : text, fontSize: 14, lineHeight: 1.6, border: m.role === "ai" ? `1px solid ${border}` : "none", whiteSpace: "pre-wrap" }}>
-                    {m.content}
-                  </div>
+          ) : currentSession.messages.map((m, i) => (
+            <div key={i} style={{ display: "flex", gap: 10, flexDirection: m.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
+              <div style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, background: m.role === "ai" ? "linear-gradient(135deg,#7F77DD,#1D9E75)" : "#534AB7", color: "white" }}>
+                {m.role === "ai" ? "✦" : (email ? email[0].toUpperCase() : "U")}
+              </div>
+              <div style={{ maxWidth: "72%", display: "flex", flexDirection: "column", gap: 6 }}>
+                {m.imageUrl && <img src={m.imageUrl} alt="uploaded" style={{ maxWidth: 200, borderRadius: 10, border: `1px solid ${border}` }} />}
+                <div style={{ padding: "9px 13px", borderRadius: m.role === "user" ? "14px 4px 14px 14px" : "4px 14px 14px 14px", background: m.role === "user" ? "#534AB7" : surface, color: m.role === "user" ? "white" : text, fontSize: 14, lineHeight: 1.6, border: m.role === "ai" ? `1px solid ${border}` : "none", whiteSpace: "pre-wrap" }}>
+                  {m.content}
                 </div>
               </div>
-            ))
-          )}
+            </div>
+          ))}
           {loading && (
             <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
               <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg,#7F77DD,#1D9E75)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "white", flexShrink: 0 }}>✦</div>
               <div style={{ padding: "12px 16px", borderRadius: "4px 14px 14px 14px", background: surface, border: `1px solid ${border}`, display: "flex", gap: 4, alignItems: "center" }}>
-                {[0, 1, 2].map(i => (
-                  <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: muted, animation: "bounce 1.2s infinite", animationDelay: `${i * 0.2}s` }} />
-                ))}
+                {[0,1,2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: muted, animation: "bounce 1.2s infinite", animationDelay: `${i*0.2}s` }} />)}
               </div>
             </div>
           )}
@@ -272,19 +300,45 @@ export default function App() {
         </div>
 
         <div style={{ padding: "12px 16px", borderTop: `1px solid ${border}` }}>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 8, background: inputBg, border: `1px solid ${border}`, borderRadius: 12, padding: "8px 10px" }}>
+          {recording && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, padding: "8px 12px", background: darkMode ? "#1a0a2e" : "#f0eeff", borderRadius: 10, border: `1px solid #534AB7` }}>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 20 }}>
+                {waveform.map((h, i) => (
+                  <div key={i} style={{ width: 3, height: h, background: "#7F77DD", borderRadius: 2, transition: "height 0.1s" }} />
+                ))}
+              </div>
+              <span style={{ fontSize: 13, color: "#7F77DD", flex: 1 }}>{transcript || "Listening..."}</span>
+              <button onClick={toggleVoice} style={{ background: "#534AB7", border: "none", color: "white", borderRadius: 6, padding: "3px 8px", fontSize: 12, cursor: "pointer" }}>Stop</button>
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 8, background: inputBg, border: `1px solid ${recording ? "#534AB7" : border}`, borderRadius: 12, padding: "8px 10px", transition: "border-color 0.2s" }}>
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".pdf,.txt" style={{ display: "none" }} />
             <input type="file" ref={imageInputRef} onChange={handleImageUpload} accept="image/*" style={{ display: "none" }} />
-            <button onClick={() => fileInputRef.current?.click()} title="Upload PDF/TXT" style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", color: muted, cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>📄</button>
-            <button onClick={() => imageInputRef.current?.click()} title="Upload Image" style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", color: muted, cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>🖼️</button>
-            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Message Assistiq..." rows={1} style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: 14, color: text, resize: "none", minHeight: 22, maxHeight: 120, lineHeight: 1.5, fontFamily: "sans-serif" }} />
-            <button onClick={toggleVoice} title={recording ? "Stop recording" : "Voice input"} style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: recording ? "#7F77DD" : "transparent", color: recording ? "white" : muted, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.2s" }}>🎤</button>
+            <div ref={attachMenuRef} style={{ position: "relative", flexShrink: 0 }}>
+              <button onClick={() => setShowAttachMenu(v => !v)} title="Attach file" style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: showAttachMenu ? (darkMode ? "#2a2a2a" : "#e0e0e0") : "transparent", color: showAttachMenu ? "#7F77DD" : muted, cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center" }}>📎</button>
+              {showAttachMenu && (
+                <div style={{ position: "absolute", bottom: 38, left: 0, background: darkMode ? "#1e1e1e" : "#ffffff", border: `1px solid ${border}`, borderRadius: 10, padding: "6px", minWidth: 180, zIndex: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
+                  <button onClick={() => { fileInputRef.current?.click(); setShowAttachMenu(false); }} style={{ width: "100%", padding: "8px 12px", background: "transparent", border: "none", color: text, fontSize: 13, cursor: "pointer", borderRadius: 7, display: "flex", alignItems: "center", gap: 8, textAlign: "left" }}
+                    onMouseEnter={e => (e.currentTarget.style.background = darkMode ? "#2a2a2a" : "#f5f5f5")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                    <span>📄</span> Document (PDF / TXT)
+                  </button>
+                  <button onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }} style={{ width: "100%", padding: "8px 12px", background: "transparent", border: "none", color: text, fontSize: 13, cursor: "pointer", borderRadius: 7, display: "flex", alignItems: "center", gap: 8, textAlign: "left" }}
+                    onMouseEnter={e => (e.currentTarget.style.background = darkMode ? "#2a2a2a" : "#f5f5f5")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                    <span>🖼️</span> Image (PNG / JPG)
+                  </button>
+                </div>
+              )}
+            </div>
+            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder={recording ? "Listening..." : "Message Assistiq..."} rows={1} style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: 14, color: text, resize: "none", minHeight: 22, maxHeight: 120, lineHeight: 1.5, fontFamily: "sans-serif" }} />
+            <button onClick={toggleVoice} title={recording ? "Stop recording" : "Voice input"} style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: recording ? "#7F77DD" : "transparent", color: recording ? "white" : muted, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.2s", animation: recording ? "pulse 1s infinite" : "none" }}>🎤</button>
             <button onClick={() => sendMessage()} disabled={!input.trim() || loading} style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: input.trim() ? "#534AB7" : border, color: "white", cursor: input.trim() ? "pointer" : "default", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>↑</button>
           </div>
           <p style={{ textAlign: "center", fontSize: 11, color: muted, marginTop: 8 }}>Assistiq can make mistakes. Verify important info.</p>
         </div>
       </div>
-      <style>{`@keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} } * { box-sizing: border-box; } body { margin: 0; }`}</style>
+      <style>{`@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}} *{box-sizing:border-box;} body{margin:0;}`}</style>
     </div>
   );
 }
