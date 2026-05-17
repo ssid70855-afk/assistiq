@@ -20,7 +20,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [token, setToken] = useState("");
+  
   const [error, setError] = useState("");
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = useState<string>("");
@@ -66,7 +66,7 @@ export default function App() {
         return;
       }
       const { data } = await axios.post(`${API}/login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`);
-      setToken(data.token);
+      
       setPage("chat");
       newSession();
     } catch {
