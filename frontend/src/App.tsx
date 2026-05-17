@@ -20,7 +20,6 @@ export default function App() {
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  
   const [error, setError] = useState("");
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = useState<string>("");
@@ -65,8 +64,7 @@ export default function App() {
         setError("Account created! Please log in.");
         return;
       }
-      const { data } = await axios.post(`${API}/login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`);
-      
+      await axios.post(`${API}/login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`);
       setPage("chat");
       newSession();
     } catch {
@@ -85,8 +83,8 @@ export default function App() {
     updateSession(activeSession, updated, isFirst ? text.slice(0, 40) : undefined);
     setLoading(true);
     try {
-      const { data } = await axios.post(`${API}/chat?session_id=${activeSession}&user_message=${encodeURIComponent(text)}`);
-      const aiMsg: Message = { role: "ai", content: data.reply };
+      const res = await axios.post(`${API}/chat?session_id=${activeSession}&user_message=${encodeURIComponent(text)}`);
+      const aiMsg: Message = { role: "ai", content: res.data.reply };
       updateSession(activeSession, [...updated, aiMsg]);
     } catch {
       updateSession(activeSession, [...updated, { role: "ai", content: "Sorry, something went wrong." }]);
@@ -105,8 +103,8 @@ export default function App() {
     const updated = [...session.messages, userMsg];
     updateSession(activeSession, updated);
     try {
-      const { data } = await axios.post(`${API}/upload`, formData);
-      const aiMsg: Message = { role: "ai", content: `✅ Got it! I've loaded **${file.name}** (${data.chunks_stored} chunks). Ask me anything about it.` };
+      const res = await axios.post(`${API}/upload`, formData);
+      const aiMsg: Message = { role: "ai", content: `✅ Got it! I've loaded **${file.name}** (${res.data.chunks_stored} chunks). Ask me anything about it.` };
       updateSession(activeSession, [...updated, aiMsg]);
     } catch {
       updateSession(activeSession, [...updated, { role: "ai", content: "Failed to upload file." }]);
@@ -127,8 +125,8 @@ export default function App() {
     const updated = [...session.messages, userMsg];
     updateSession(activeSession, updated);
     try {
-      const { data } = await axios.post(`${API}/image`, formData);
-      const aiMsg: Message = { role: "ai", content: data.reply };
+      const res = await axios.post(`${API}/image`, formData);
+      const aiMsg: Message = { role: "ai", content: res.data.reply };
       updateSession(activeSession, [...updated, aiMsg]);
     } catch {
       updateSession(activeSession, [...updated, { role: "ai", content: "Failed to analyze image." }]);
@@ -171,7 +169,7 @@ export default function App() {
   const inputBg = darkMode ? "#1a1a1a" : "#f0f0f0";
 
   if (page === "landing") return (
-    <div style={{ minHeight: "100vh", background: bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-sans)", padding: "2rem" }}>
+    <div style={{ minHeight: "100vh", background: bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "sans-serif", padding: "2rem" }}>
       <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#7F77DD,#1D9E75)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
         <span style={{ color: "white", fontSize: 18 }}>✦</span>
       </div>
@@ -185,7 +183,7 @@ export default function App() {
   );
 
   if (page === "auth") return (
-    <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-sans)" }}>
+    <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "sans-serif" }}>
       <div style={{ width: 360, background: surface, borderRadius: 16, padding: "2rem", border: `1px solid ${border}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 24, justifyContent: "center" }}>
           <div style={{ width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg,#7F77DD,#1D9E75)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -208,7 +206,7 @@ export default function App() {
   );
 
   return (
-    <div style={{ display: "flex", height: "100vh", background: bg, fontFamily: "var(--font-sans)", color: text }}>
+    <div style={{ display: "flex", height: "100vh", background: bg, fontFamily: "sans-serif", color: text }}>
       <div style={{ width: 220, background: surface, borderRight: `1px solid ${border}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "14px 12px 10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
@@ -238,10 +236,9 @@ export default function App() {
         <div style={{ padding: "12px 20px", borderBottom: `1px solid ${border}`, fontSize: 14, fontWeight: 500 }}>
           {currentSession?.title || "Select a chat"}
         </div>
-
         <div style={{ flex: 1, overflowY: "auto", padding: "20px", display: "flex", flexDirection: "column", gap: 16 }}>
           {!currentSession || currentSession.messages.length === 0 ? (
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: muted, gap: 8 }}>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: muted, gap: 8, marginTop: "20vh" }}>
               <div style={{ fontSize: 32 }}>✦</div>
               <p style={{ fontSize: 16, fontWeight: 500, color: text }}>How can I help you today?</p>
               <p style={{ fontSize: 14 }}>Type, speak, or upload a file to get started</p>
@@ -280,7 +277,7 @@ export default function App() {
             <input type="file" ref={imageInputRef} onChange={handleImageUpload} accept="image/*" style={{ display: "none" }} />
             <button onClick={() => fileInputRef.current?.click()} title="Upload PDF/TXT" style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", color: muted, cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>📄</button>
             <button onClick={() => imageInputRef.current?.click()} title="Upload Image" style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", color: muted, cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>🖼️</button>
-            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Message Assistiq..." rows={1} style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: 14, color: text, resize: "none", minHeight: 22, maxHeight: 120, lineHeight: 1.5, fontFamily: "var(--font-sans)" }} />
+            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Message Assistiq..." rows={1} style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: 14, color: text, resize: "none", minHeight: 22, maxHeight: 120, lineHeight: 1.5, fontFamily: "sans-serif" }} />
             <button onClick={toggleVoice} title={recording ? "Stop recording" : "Voice input"} style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: recording ? "#7F77DD" : "transparent", color: recording ? "white" : muted, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.2s" }}>🎤</button>
             <button onClick={() => sendMessage()} disabled={!input.trim() || loading} style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: input.trim() ? "#534AB7" : border, color: "white", cursor: input.trim() ? "pointer" : "default", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>↑</button>
           </div>
