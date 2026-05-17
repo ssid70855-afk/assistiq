@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from groq import Groq
 from pypdf import PdfReader
 import bcrypt
+import base64
 import io
 import os
 
@@ -54,6 +55,34 @@ async def upload_file(file: UploadFile = File(...)):
     doc_store["current"] = text
     chunks = len(text) // 500
     return {"chunks_stored": max(1, chunks)}
+
+@app.post("/image")
+async def analyze_image(file: UploadFile = File(...)):
+    content = await file.read()
+    b64 = base64.b64encode(content).decode("utf-8")
+    media_type = file.content_type or "image/png"
+    response = groq_client.chat.completions.create(
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{media_type};base64,{b64}"
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": "Please do two things: 1) Describe this image in detail. 2) Extract and list any text visible in the image. If there is no text, say 'No text found'."
+                    }
+                ]
+            }
+        ],
+        max_tokens=1024
+    )
+    return {"reply": response.choices[0].message.content}
 
 @app.post("/chat")
 def chat(session_id: str, user_message: str):
